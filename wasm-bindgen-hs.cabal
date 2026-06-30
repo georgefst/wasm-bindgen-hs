@@ -38,6 +38,7 @@ library
         Lib
 
 test-suite tests
+    import: common
     hs-source-dirs: test
     main-is: Test.hs
     type: exitcode-stdio-1.0
