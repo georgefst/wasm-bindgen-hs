@@ -21,15 +21,29 @@ common common
         OrPatterns
         OverloadedLabels
         OverloadedRecordDot
+        OverloadedStrings
         PartialTypeSignatures
         RecordWildCards
+        TemplateHaskell
         ViewPatterns
     ghc-options:
-        -threaded
         -Wall
     build-depends:
+        aeson,
         base >=4.14,
+        bytestring,
+        ghc-experimental,
         template-haskell,
+        text,
+        time,
+        vector,
+        vector-stream,
+    if os(wasi)
+        build-depends:
+            canary,
+    else
+        ghc-options:
+            -threaded
 
 library
     import: common
@@ -42,3 +56,5 @@ test-suite tests
     hs-source-dirs: test
     main-is: Test.hs
     type: exitcode-stdio-1.0
+    build-depends:
+        wasm-bindgen-hs,
