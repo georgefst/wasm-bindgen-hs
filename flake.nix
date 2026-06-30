@@ -5,6 +5,7 @@
     nixpkgs.follows = "haskell-nix/nixpkgs-2511";
     flake-utils.url = "github:numtide/flake-utils";
     hls-2-13 = { url = "github:haskell/haskell-language-server/2.13.0.0"; flake = false; };
+    ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     self.submodules = true;
   };
   outputs = inputs@{ self, nixpkgs, flake-utils, haskell-nix, ... }:
@@ -18,7 +19,7 @@
                 src = ./.;
                 compiler-nix-name = "ghc914";
                 evalSystem = "x86_64-linux";
-                crossPlatforms = p: [ p.wasi32 ];
+                shell.nativeBuildInputs = [ inputs.ghc-wasm-meta.packages.${system}.default ];
                 shell.tools.cabal = "latest";
                 shell.tools.haskell-language-server = {
                   src = inputs.hls-2-13;
