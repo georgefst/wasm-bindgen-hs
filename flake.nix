@@ -1,11 +1,14 @@
 {
   description = "Basic Haskell flake";
-  inputs.haskell-nix.url = "github:input-output-hk/haskell.nix";
-  inputs.nixpkgs.follows = "haskell-nix/nixpkgs-2511";
-  inputs.flake-utils.url = "github:numtide/flake-utils";
-  inputs.hls-2-13 = { url = "github:haskell/haskell-language-server/2.13.0.0"; flake = false; };
+  inputs = {
+    haskell-nix.url = "github:input-output-hk/haskell.nix";
+    nixpkgs.follows = "haskell-nix/nixpkgs-2511";
+    flake-utils.url = "github:numtide/flake-utils";
+    hls-2-13 = { url = "github:haskell/haskell-language-server/2.13.0.0"; flake = false; };
+    self.submodules = true;
+  };
   outputs = inputs@{ self, nixpkgs, flake-utils, haskell-nix, ... }:
-    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-darwin" ] (system:
+    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         overlays = [
           haskell-nix.overlay
@@ -13,18 +16,9 @@
             myHaskellProject =
               final.haskell-nix.hix.project {
                 src = ./.;
-                compiler-nix-name = "ghc9141";
+                compiler-nix-name = "ghc914";
                 evalSystem = "x86_64-linux";
-                crossPlatforms = p:
-                  final.lib.optionals final.stdenv.hostPlatform.isx86_64
-                    ([
-                      p.wasi32
-                    ] ++ final.lib.optionals final.stdenv.hostPlatform.isLinux
-                      [
-                        p.musl64
-                        p.aarch64-multiplatform
-                      ]
-                    );
+                crossPlatforms = p: [ p.wasi32 ];
                 shell.tools.cabal = "latest";
                 shell.tools.haskell-language-server = {
                   src = inputs.hls-2-13;

@@ -5,9 +5,7 @@ license-file: LICENSE
 author: George Thomas
 maintainer: georgefsthomas@gmail.com
 
-executable wasm-bindgen-hs
-    main-is: Main.hs
-    hs-source-dirs: app
+common common
     default-language: GHC2024
     default-extensions:
         BlockArguments
@@ -31,3 +29,15 @@ executable wasm-bindgen-hs
         -Wall
     build-depends:
         base >=4.14,
+        template-haskell,
+
+library
+    import: common
+    hs-source-dirs: src
+    exposed-modules:
+        Lib
+
+test-suite tests
+    hs-source-dirs: test
+    main-is: Test.hs
+    type: exitcode-stdio-1.0

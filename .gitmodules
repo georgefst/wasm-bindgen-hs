@@ -1,0 +1,3 @@
+[submodule "canary"]
+	path = canary
+	url = https://github.com/haskell-wasm/canary/

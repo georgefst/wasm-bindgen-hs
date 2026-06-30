@@ -1,0 +1,23 @@
+packages:
+    .
+    canary
+
+if os(wasi)
+    shared: True
+    constraints:
+        containers installed,
+        ghc-experimental installed,
+        text installed,
+        time installed,
+
+allow-newer:
+    *:base,
+    *:template-haskell,
+    *:containers,
+    *:text,
+    *:time,
+    aeson:containers,
+    aeson:QuickCheck,
+
+package tasty
+  flags: -unix
