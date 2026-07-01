@@ -19,36 +19,43 @@ main = pure ()
 -- IO with unit return
 logMessage :: Text -> IO ()
 logMessage = T.putStrLn
-$(exportJS Async 'logMessage)
-
--- IO with Text return
-greet :: Text -> IO Text
-greet name = do
-    t <- getCurrentTime
-    pure $ "Hello, " <> name <> "! The time is: " <> T.show t
-$(exportJS Async 'greet)
+$(exportDeclJS Async 'logMessage)
 
 -- Pure, multiple Text args
 greetManyPure :: Text -> Text -> Text -> Text
-greetManyPure name1 name2 name3 = "Hello, " <> name1 <> ", " <> name2  <> " and " <> name3 <> "!"
-$(exportJS Async 'greetManyPure)
+greetManyPure name1 name2 name3 = "Hello, " <> name1 <> ", " <> name2 <> " and " <> name3 <> "!"
+$(exportDeclJS Async 'greetManyPure)
 
 -- Natively marshalable types, sync
 addByte :: Word8 -> Word8 -> Word8
 addByte = (+)
-$(exportJS Sync 'addByte)
+$(exportDeclJS Sync 'addByte)
 
 -- Float/Double
 multiplyDouble :: Double -> Double -> Double
 multiplyDouble = (*)
-$(exportJS Sync 'multiplyDouble)
+$(exportDeclJS Sync 'multiplyDouble)
 
 -- Bool
 negateBool :: Bool -> Bool
 negateBool = not
-$(exportJS Sync 'negateBool)
+$(exportDeclJS Sync 'negateBool)
 
 -- No args, pure
 theAnswer :: Word64
 theAnswer = 4815162342
-$(exportJS Sync 'theAnswer)
+$(exportDeclJS Sync 'theAnswer)
+
+-- Anonymous
+$(exportJS Sync "addInt" [||(+) @Int||])
+$(exportJS Async "replicateText" [||T.replicate||])
+$(exportJS Async "getCurrentTimeText" [||T.show <$> getCurrentTime||])
+$(exportJS
+    Async
+    "greet"
+    [||
+    \name -> do
+        t <- getCurrentTime
+        pure $ "Hello, " <> name <> "! The time is: " <> T.show t
+    ||]
+ )

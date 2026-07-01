@@ -35,6 +35,7 @@ common common
         ghc-experimental,
         template-haskell,
         text,
+        th-utilities,
         time,
         vector,
         vector-stream,

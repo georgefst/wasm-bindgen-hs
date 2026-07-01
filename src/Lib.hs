@@ -3,6 +3,7 @@
 
 module Lib (
     exportJS,
+    exportDeclJS,
     Synchronicity (..),
 ) where
 
@@ -11,9 +12,12 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Short (ShortByteString)
 import Data.Function (applyWhen)
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Kind (FUN)
 import Data.Text (Text)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Language.Haskell.TH
+import TH.Utilities (typeRepToType)
+import Type.Reflection (SomeTypeRep (..), Typeable, typeRep)
 
 #ifdef wasi_HOST_OS
 import GHC.Wasm.JS.String (
@@ -45,13 +49,24 @@ type JSString = ()
 data Synchronicity = Sync | Async
     deriving stock (Eq, Ord, Show, Enum, Bounded)
 
-exportJS :: Synchronicity -> Name -> DecsQ
-exportJS sync declName = do
-    let declNameStr = nameBase declName
+-- | Generate a JS FFI export for the given named expression.
+exportJS :: forall a. (Typeable a) => Synchronicity -> String -> Code Q a -> DecsQ
+exportJS sync name code = do
+    ty <- typeRepToType $ SomeTypeRep $ typeRep @a
+    expr <- unType <$> examineCode code
+    mkExport sync name expr ty
+
+-- | Generate a JS FFI export for a top-level definition, using its existing name.
+exportDeclJS :: Synchronicity -> Name -> DecsQ
+exportDeclJS sync declName = do
     info <- reify declName
     ty <- case info of
         VarI _ t _ -> pure t
         _ -> fail $ show declName <> " is not a term variable"
+    mkExport sync (nameBase declName) (VarE declName) ty
+
+mkExport :: Synchronicity -> String -> Exp -> Type -> DecsQ
+mkExport sync exportName bodyExpr ty = do
     let (argTys, resTy0) = splitFunTy ty
         (isIO, resTy) = case resTy0 of
             AppT (ConT io) t | io == ''IO -> (True, t)
@@ -65,11 +80,11 @@ exportJS sync declName = do
             (fail $ "No known conversion to JS for type: " <> pprint resTy)
             pure
             $ resInfo resTy
-    wrapperName <- newName $ "js_export_" <> declNameStr
+    wrapperName <- newName $ "js_export_" <> exportName
     let namedArgs = zipWith (\TypeInfo{..} n -> NamedArgInfo{var = mkName ("x" <> show @Int n), ..}) args [0 ..]
         tyJS = joinFunTy (map (.jsType) args) $ applyWhen isIO (AppT (ConT ''IO)) res.jsType
         exportStr =
-            declNameStr <> case sync of
+            exportName <> case sync of
                 Async -> ""
                 Sync -> " sync"
         exportDecl = ForeignD $ ExportF JavaScript exportStr wrapperName tyJS
@@ -84,7 +99,7 @@ exportJS sync declName = do
                             `AppE` VarE res.converter
                             `AppE` foldl
                                 AppE
-                                (VarE declName)
+                                bodyExpr
                                 (map (\arg -> VarE arg.converter `AppE` VarE arg.var) namedArgs)
                         )
                     )
@@ -147,6 +162,7 @@ splitFunTy = go
   where
     go = \case
         AppT (AppT ArrowT arg) rest -> first (arg :) $ go rest
+        AppT (AppT (ConT fun) arg) rest | fun == ''FUN -> first (arg :) $ go rest
         t -> ([], t)
 joinFunTy :: [Type] -> Type -> Type
 joinFunTy = flip $ foldr (\a r -> ArrowT `AppT` a `AppT` r)
