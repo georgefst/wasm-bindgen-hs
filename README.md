@@ -13,4 +13,4 @@ js_export_getCurrentTimeText :: IO JSString
 js_export_getCurrentTimeText = textToJSString . Text.show <$> getCurrentTime
 ```
 
-Ultimate goal is to make converting a Haskell library to an NPM package as simple as possible.
+Ultimate goal is to make converting a Haskell library to a TypeScript NPM package as simple as possible.
