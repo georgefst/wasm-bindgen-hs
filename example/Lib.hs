@@ -2,6 +2,7 @@
 
 module Lib where
 
+import Data.Function
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -42,6 +43,18 @@ $(exportDeclJS Sync 'negateBool)
 theAnswer :: Word64
 theAnswer = 4815162342
 $(exportDeclJS Sync 'theAnswer)
+
+-- Sieve of Eratosthenes
+data InfList a = InfList a (InfList a)
+primesUpTo :: Int -> Text
+primesUpTo n = T.show $ take n $ toListInf primes
+  where
+    primes = sieve $ enumFromInf (2 :: Int)
+    sieve (InfList p ps) = InfList p $ sieve $ filterInf ((/= 0) . (`mod` p)) ps
+    enumFromInf x = InfList x $ enumFromInf (x + 1)
+    toListInf (InfList x xs) = x : toListInf xs
+    filterInf f (InfList x xs) = applyWhen (f x) (InfList x) $ filterInf f xs
+$(exportDeclJS Sync 'primesUpTo)
 
 -- Anonymous
 $(exportJS Sync "addInt" [||(+) @Int||])
