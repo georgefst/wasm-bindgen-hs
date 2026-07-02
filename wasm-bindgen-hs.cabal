@@ -50,7 +50,7 @@ library
     import: common
     hs-source-dirs: src
     exposed-modules:
-        Lib
+        Wasm.Export
 
 test-suite tests
     import: common

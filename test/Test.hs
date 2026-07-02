@@ -7,7 +7,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time (getCurrentTime)
 import Data.Word
-import Lib
+import Wasm.Export
 
 #ifdef wasi_HOST_OS
 import GHC.Wasm.Prim

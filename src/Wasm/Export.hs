@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Lib (
+module Wasm.Export (
     exportJS,
     exportDeclJS,
     Synchronicity (..),
