@@ -2,6 +2,8 @@ packages:
     .
     canary
 
+tests: True
+
 if os(wasi)
     shared: True
     constraints:
