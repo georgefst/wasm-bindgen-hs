@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP #-}
 
-module Main (main) where
+module Lib where
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -12,9 +12,6 @@ import Wasm.Export
 #ifdef wasi_HOST_OS
 import GHC.Wasm.Prim
 #endif
-
-main :: IO ()
-main = pure ()
 
 -- IO with unit return
 logMessage :: Text -> IO ()

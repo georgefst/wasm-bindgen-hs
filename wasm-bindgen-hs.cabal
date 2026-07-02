@@ -52,10 +52,12 @@ library
     exposed-modules:
         Wasm.Export
 
-test-suite tests
+executable example
     import: common
-    hs-source-dirs: test
-    main-is: Test.hs
-    type: exitcode-stdio-1.0
+    main-is: Lib.hs
+    hs-source-dirs: example
     build-depends:
         wasm-bindgen-hs,
+    ghc-options:
+        -no-hs-main
+        -optl-mexec-model=reactor
