@@ -46,7 +46,7 @@ $(exportDeclJS Sync 'theAnswer)
 -- Anonymous
 $(exportJS Sync "addInt" [||(+) @Int||])
 $(exportJS Async "replicateText" [||T.replicate||])
-$(exportJS Async "getCurrentTimeText" [||T.show <$> getCurrentTime||])
+$(exportJS Sync "getCurrentTimeText" [||T.show <$> getCurrentTime||])
 $(exportJS
     Async
     "greet"
