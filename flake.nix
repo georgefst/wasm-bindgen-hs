@@ -5,7 +5,6 @@
     nixpkgs.follows = "haskell-nix/nixpkgs-2511";
     flake-utils.url = "github:numtide/flake-utils";
     hls-master = { url = "github:haskell/haskell-language-server/master"; flake = false; };
-    ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     self.submodules = true;
   };
   outputs = inputs@{ self, nixpkgs, flake-utils, haskell-nix, ... }:
@@ -19,10 +18,19 @@
                 src = ./.;
                 compiler-nix-name = "ghc914";
                 evalSystem = "x86_64-linux";
-                shell.nativeBuildInputs = [ inputs.ghc-wasm-meta.packages.${system}.default ];
+                crossPlatforms = p: [ p.wasi32 ];
                 shell.tools.cabal = "latest";
                 shell.tools.haskell-language-server.src = inputs.hls-master;
                 shell.withHoogle = false;
+                shell.nativeBuildInputs = [
+                  (
+                    pkgs.writeShellScriptBin "wasm-cabal" ''
+                      NIX_LDFLAGS_FOR_TARGET=$(echo "$NIX_LDFLAGS_FOR_TARGET" \
+                        | sed 's/ *[^ ]*libffi-[0-9][^ ]* */ /g') \
+                      exec wasm32-unknown-wasi-cabal "$@"
+                    ''
+                  )
+                ];
               };
           })
         ];

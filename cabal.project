@@ -2,7 +2,8 @@ packages:
     .
     canary
 
-tests: True
+package wasm-bindgen-hs
+    tests: True
 
 if os(wasi)
     shared: True
