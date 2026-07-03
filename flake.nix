@@ -31,6 +31,9 @@
                     ''
                   )
                 ];
+                shell.shellHook = ''
+                  export NIX_LDFLAGS=$(echo "$NIX_LDFLAGS" | tr ' ' '\n' | grep -v 'wasm' | tr '\n' ' ')
+                '';
               };
           })
         ];
