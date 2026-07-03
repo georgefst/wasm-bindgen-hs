@@ -21,11 +21,19 @@ executable cabal-npm
     ghc-options:
         -Wall
         -threaded
-    hs-source-dirs: src
+    -- The TS modules are compiled from the wasm-bindgen-hs library's source
+    -- tree, rather than depended upon, so that this tool can be built
+    -- standalone (e.g. packaged by downstream Nix code) without also
+    -- packaging the library and its TH-oriented dependencies. This breaks
+    -- sdists, but we'll split the TS stuff into its own package before ever
+    -- publishing anything (see TODO.md).
+    hs-source-dirs: src ../src
     main-is: Main.hs
     other-modules:
         Pack
         Runtime
+        TS.AST
+        TS.Serialize
     build-depends:
         aeson,
         aeson-pretty,
@@ -37,4 +45,3 @@ executable cabal-npm
         process,
         temporary,
         text,
-        wasm-bindgen-hs,
