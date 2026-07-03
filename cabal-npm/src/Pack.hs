@@ -12,18 +12,20 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Encode.Pretty qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char (isDigit)
-import Data.List (isPrefixOf, isSuffixOf, sort, tails)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.List (isPrefixOf, isSuffixOf, nub, partition, sort, sortOn, tails)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Runtime (runtimeMjs)
 import System.Directory (copyFile, createDirectoryIfMissing, findExecutable, listDirectory, removeFile)
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath (dropExtension, (</>))
-import Runtime (runtimeMjs)
+import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process (CreateProcess (..), callProcess, proc, readCreateProcess, readProcess, waitForProcess, withCreateProcess)
+import TS.AST qualified as TS
+import TS.Serialize (serializeDecl, serializeOpaqueClassDecl)
 
 data PackConfig = PackConfig
     { cabalTarget :: Text
@@ -36,10 +38,14 @@ data PackConfig = PackConfig
     -- ^ Output directory for the assembled NPM package
     , wasiShimVersion :: Text
     -- ^ Version constraint for @bjorn3/browser_wasi_shim, e.g. "^0.4.2"
+    , wasmCabal :: Maybe Text
+    -- ^ A cabal command already configured for the Wasm toolchain, e.g.
+    -- ghc-wasm-meta's @wasm32-wasi-cabal@. When absent, the invoking cabal is
+    -- reused with @--with-ghc@ flags for the toolchain programs on PATH.
     }
 
 -- | Marker file read by the TH splices in @Wasm.Export@, naming the directory
--- where they write @.d.ts@ fragments. A file rather than an environment
+-- where they write declaration fragments. A file rather than an environment
 -- variable, since GHC's Wasm external interpreter (where TH runs) does not
 -- inherit the host environment.
 tsOutDirFile :: FilePath
@@ -48,25 +54,26 @@ tsOutDirFile = ".wasm-bindgen-hs-ts-out-dir"
 pack :: PackConfig -> IO ()
 pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
     let -- A fresh build directory guarantees a clean build, so TH always
-        -- reruns and the .d.ts fragments can never be stale. Using our own
-        -- build directory also keeps ordinary dev builds' caches intact.
+        -- reruns and the declaration fragments can never be stale. Using our
+        -- own build directory also keeps ordinary dev builds' caches intact.
         buildDirFlag = T.pack $ "--builddir=" <> (tmpDir </> "dist")
         tsOutDir = tmpDir </> "ts"
     createDirectoryIfMissing True tsOutDir
-    wasmCabal <- getWasmCabal
+    cabal <- getWasmCabal wasmCabal
 
-    -- Build the wasm binary, with TH writing .d.ts fragments to tsOutDir
+    -- Build the wasm binary, with TH writing declaration fragments to tsOutDir
     T.putStrLn $ "Building " <> cabalTarget <> "..."
     bracket_
         (writeFile tsOutDirFile tsOutDir)
         (removeFile tsOutDirFile)
-        (callWasmCabal wasmCabal ["build", cabalTarget, buildDirFlag])
+        (callWasmCabal cabal ["build", cabalTarget, buildDirFlag])
 
     -- Locate the built wasm binary
-    wasmBin <- T.unpack <$> readWasmCabal wasmCabal ["list-bin", cabalTarget, buildDirFlag]
+    wasmBin <- T.unpack <$> readWasmCabal cabal ["list-bin", cabalTarget, buildDirFlag]
 
     -- Locate GHC libdir for post-link.mjs
-    ghcLibdir <- T.unpack <$> runRead "wasm32-unknown-wasi-ghc" ["--print-libdir"]
+    wasmGhc <- getWasmGhc
+    ghcLibdir <- T.unpack <$> runRead wasmGhc ["--print-libdir"]
     let postLink = ghcLibdir </> "post-link.mjs"
 
     -- Create output directory
@@ -86,19 +93,19 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
     -- we may generate it per-target eventually)
     T.writeFile (outDir </> "runtime.mjs") runtimeMjs
 
-    -- Read export names from the generated .d.ts fragment filenames
-    exportNames <- getExportNames tsOutDir
-    when (null exportNames) $
+    -- Read export declarations from the TH-generated fragments
+    decls <- readDecls tsOutDir
+    when (null decls) $
         fail $
-            "no .d.ts fragments were generated; does " <> T.unpack cabalTarget <> " have any Wasm.Export splices?"
+            "no declaration fragments were generated; does " <> T.unpack cabalTarget <> " have any Wasm.Export splices?"
+    let bindings = analyseBindings decls
 
-    -- Assemble type declarations from the TH-generated fragments
-    declarations <- assembleDeclarations tsOutDir exportNames
-    T.writeFile (outDir </> "index.d.ts") declarations
-    T.writeFile (outDir </> "index.d.mts") declarations
+    -- Assemble type declarations
+    T.writeFile (outDir </> "index.d.ts") $ generateDeclarations bindings
+    T.writeFile (outDir </> "index.d.mts") $ generateDeclarations bindings
 
-    -- Generate index.mjs with re-exports
-    T.writeFile (outDir </> "index.mjs") $ generateIndexMjs cabalTarget exportNames
+    -- Generate index.mjs
+    T.writeFile (outDir </> "index.mjs") $ generateIndexMjs cabalTarget bindings
 
     -- Generate package.json
     LBS.writeFile (outDir </> "package.json") $ Aeson.encodePretty packageJson <> "\n"
@@ -132,20 +139,49 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
                     ]
             ]
 
-getExportNames :: FilePath -> IO [Text]
-getExportNames dir = do
+readDecls :: FilePath -> IO [TS.Decl]
+readDecls dir = do
     files <- listDirectory dir
-    pure $ sort [T.pack $ dropExtension $ dropExtension f | f <- files, ".d.ts" `isSuffixOf` f]
+    decls <-
+        traverse
+            (\f -> either (fail . ((f <> ": ") <>)) pure =<< Aeson.eitherDecodeFileStrict (dir </> f))
+            (sort [f | f <- files, ".json" `isSuffixOf` f])
+    pure $ sortOn (.name) decls
 
-assembleDeclarations :: FilePath -> [Text] -> IO Text
-assembleDeclarations srcDir names = do
-    decls <- traverse (\n -> T.readFile $ srcDir </> T.unpack n <> ".d.ts") names
-    pure $ "export function init(): Promise<void>;\n" <> mconcat decls
+-- | The full set of bindings to generate for a package.
+data Bindings = Bindings
+    { functions :: [TS.Decl]
+    -- ^ Publicly exported functions
+    , opaqueTypes :: [Text]
+    -- ^ Names of opaque Haskell types, each wrapped in a generated class. The
+    -- corresponding auto-generated @free_T@ exports are consumed by the
+    -- classes rather than exported.
+    }
 
-generateIndexMjs :: Text -> [Text] -> Text
-generateIndexMjs wasmFile names =
-    -- NB. multiline strings can't express the trailing blank line
-    T.replace "WASM_FILE" wasmFile template <> "\n" <> T.unlines (map mkExport names)
+analyseBindings :: [TS.Decl] -> Bindings
+analyseBindings decls = Bindings{functions, opaqueTypes}
+  where
+    opaqueTypes = nub $ concatMap declRefs decls
+    declRefs d = concatMap (typeRefs . snd) d.params <> typeRefs d.result
+    typeRefs = \case
+        TS.Ref n -> [n]
+        TS.Promise t -> typeRefs t
+        TS.Array t -> typeRefs t
+        _ -> []
+    (_free, functions) = partition (\d -> d.name `elem` map ("free_" <>) opaqueTypes) decls
+
+generateDeclarations :: Bindings -> Text
+generateDeclarations Bindings{..} =
+    T.unlines $
+        ["export function init(): Promise<void>;"]
+            <> map serializeOpaqueClassDecl opaqueTypes
+            <> map serializeDecl functions
+
+generateIndexMjs :: Text -> Bindings -> Text
+generateIndexMjs wasmFile Bindings{..} =
+    T.replace "WASM_FILE" wasmFile template
+        <> "\n"
+        <> T.unlines (map opaqueClass opaqueTypes <> map export functions)
   where
     template =
         """
@@ -162,8 +198,79 @@ generateIndexMjs wasmFile names =
           return _exports[name](...args);
         }
 
+        const _construct = Symbol();
+
         """
-    mkExport name = "export const " <> name <> " = (...args) => _call(\"" <> name <> "\", args);"
+    opaqueClass name =
+        T.replace "NAME" name
+            """
+            const _finalizers_NAME = new FinalizationRegistry((ptr) => _call("free_NAME", [ptr]));
+            export class NAME {
+              #ptr;
+              constructor(ptr, token) {
+                if (token !== _construct) throw new Error("NAME cannot be constructed directly");
+                this.#ptr = ptr;
+                _finalizers_NAME.register(this, ptr, this);
+              }
+              static _wrap(ptr) {
+                return new NAME(ptr, _construct);
+              }
+              _unwrap() {
+                if (this.#ptr === undefined) throw new Error("attempt to use a freed NAME");
+                return this.#ptr;
+              }
+              free() {
+                if (this.#ptr === undefined) return;
+                _finalizers_NAME.unregister(this);
+                _call("free_NAME", [this.#ptr]);
+                this.#ptr = undefined;
+              }
+            }
+            """
+    export decl =
+        "export const "
+            <> decl.name
+            <> " = "
+            <> (if isAsync then "async " else "")
+            <> "("
+            <> T.intercalate ", " (map fst decl.params)
+            <> ") => "
+            <> maybe callExpr' (\c -> c $ "(" <> callExpr' <> ")") (resultConversion resType)
+            <> ";"
+      where
+        (isAsync, resType) = case decl.result of
+            TS.Promise t -> (True, t)
+            t -> (False, t)
+        callExpr' = (if isAsync then "await " else "") <> callExpr
+        callExpr =
+            "_call(\""
+                <> decl.name
+                <> "\", ["
+                <> T.intercalate ", " (map (\(n, t) -> maybe n ($ n) (argConversion t)) decl.params)
+                <> "])"
+
+-- | JS expression transformer converting a public API value to its raw FFI
+-- representation, where they differ.
+argConversion :: TS.Type -> Maybe (Text -> Text)
+argConversion = \case
+    TS.Ref _ -> Just \e -> e <> "._unwrap()"
+    TS.Array t -> mapConversion <$> argConversion t
+    -- the FFI marshals Bool as 0/1
+    TS.Boolean -> Just \e -> "Number(" <> e <> ")"
+    _ -> Nothing
+
+-- | JS expression transformer converting a raw FFI value to its public API
+-- representation, where they differ.
+resultConversion :: TS.Type -> Maybe (Text -> Text)
+resultConversion = \case
+    TS.Ref n -> Just \e -> n <> "._wrap(" <> e <> ")"
+    TS.Array t -> mapConversion <$> resultConversion t
+    -- the FFI marshals Bool as 0/1
+    TS.Boolean -> Just \e -> "Boolean(" <> e <> ")"
+    _ -> Nothing
+
+mapConversion :: (Text -> Text) -> Text -> Text
+mapConversion c e = e <> ".map((x) => " <> c "x" <> ")"
 
 -- | How to invoke cabal for cross-compiling to Wasm.
 data WasmCabal = WasmCabal
@@ -172,28 +279,32 @@ data WasmCabal = WasmCabal
     , processEnv :: [(String, String)]
     }
 
--- | Configure a cabal invocation for the wasm32-wasi cross toolchain. Uses
--- the cabal that invoked us where possible ($CABAL_EXTERNAL_CABAL_PATH is set
--- when we're run as `cabal npm` via cabal's external command system), and
--- passes the toolchain flags itself, mirroring haskell.nix's
--- @wasm32-unknown-wasi-cabal@ wrapper.
-getWasmCabal :: IO WasmCabal
-getWasmCabal = do
-    exe <- fromMaybe "cabal" <$> lookupEnv "CABAL_EXTERNAL_CABAL_PATH"
-    pkgConfig <- findExecutable "wasm32-unknown-wasi-pkg-config"
+-- | Configure a cabal invocation for the wasm32-wasi cross toolchain. When no
+-- pre-configured command is given, uses the cabal that invoked us where
+-- possible ($CABAL_EXTERNAL_CABAL_PATH is set when we're run as `cabal npm`
+-- via cabal's external command system), and passes the toolchain flags
+-- itself, mirroring haskell.nix's @wasm32-unknown-wasi-cabal@ wrapper.
+getWasmCabal :: Maybe Text -> IO WasmCabal
+getWasmCabal override = do
     processEnv <- map fixNixLdflags <$> getEnvironment
-    pure
-        WasmCabal
-            { exe
-            , globalFlags =
-                [ "--with-ghc=wasm32-unknown-wasi-ghc"
-                , "--with-compiler=wasm32-unknown-wasi-ghc"
-                , "--with-ghc-pkg=wasm32-unknown-wasi-ghc-pkg"
-                , "--with-hsc2hs=wasm32-unknown-wasi-hsc2hs"
-                ]
-                    <> ["--with-pkg-config=wasm32-unknown-wasi-pkg-config" | isJust pkgConfig]
-            , processEnv
-            }
+    case override of
+        Just cmd -> pure WasmCabal{exe = T.unpack cmd, globalFlags = [], processEnv}
+        Nothing -> do
+            exe <- fromMaybe "cabal" <$> lookupEnv "CABAL_EXTERNAL_CABAL_PATH"
+            ghc <- getWasmGhc
+            pkgConfig <- findExecutable $ toolchainProgram ghc "pkg-config"
+            pure
+                WasmCabal
+                    { exe
+                    , globalFlags =
+                        [ "--with-ghc=" <> T.pack ghc
+                        , "--with-compiler=" <> T.pack ghc
+                        , "--with-ghc-pkg=" <> T.pack (toolchainProgram ghc "ghc-pkg")
+                        , "--with-hsc2hs=" <> T.pack (toolchainProgram ghc "hsc2hs")
+                        ]
+                            <> ["--with-pkg-config=" <> T.pack (toolchainProgram ghc "pkg-config") | isJust pkgConfig]
+                    , processEnv
+                    }
   where
     -- Keep the Wasm toolchain's libffi out of native builds (e.g. of Setup.hs)
     -- by stripping it from NIX_LDFLAGS_FOR_TARGET, mirroring the wasm-cabal
@@ -207,6 +318,24 @@ getWasmCabal = do
         any
             (\s -> libffiPrefix `isPrefixOf` s && maybe False isDigit (listToMaybe $ drop (length libffiPrefix) s))
             (tails w)
+
+-- | The name of the Wasm-targeting GHC on PATH; different toolchain
+-- distributions use different target prefixes (e.g. haskell.nix's
+-- @wasm32-unknown-wasi-ghc@ vs ghc-wasm-meta's @wasm32-wasi-ghc@).
+getWasmGhc :: IO FilePath
+getWasmGhc = do
+    let candidates = ["wasm32-unknown-wasi-ghc", "wasm32-wasi-ghc"]
+    found <- mapMaybe id <$> traverse (\c -> fmap (const c) <$> findExecutable c) candidates
+    case found of
+        ghc : _ -> pure ghc
+        [] -> fail $ "no Wasm-targeting GHC found on PATH (tried: " <> unwords candidates <> ")"
+
+-- | Derive a sibling toolchain program name from the GHC name, e.g.
+-- @wasm32-wasi-ghc@ -> @wasm32-wasi-ghc-pkg@, @wasm32-wasi-hsc2hs@.
+toolchainProgram :: FilePath -> String -> FilePath
+toolchainProgram ghc prog = case prog of
+    'g' : 'h' : 'c' : _ -> ghc <> drop 3 prog
+    _ -> reverse (drop 3 (reverse ghc)) <> prog
 
 wasmCabalProc :: WasmCabal -> [Text] -> CreateProcess
 wasmCabalProc cabal args =

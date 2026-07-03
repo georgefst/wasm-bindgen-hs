@@ -8,6 +8,7 @@ module Wasm.Export (
 ) where
 
 import Control.Monad (when)
+import Data.Aeson qualified as Aeson
 import Data.Bifunctor (first)
 import Data.ByteString (ByteString)
 import Data.ByteString.Short (ShortByteString)
@@ -19,7 +20,6 @@ import Data.List (dropWhileEnd)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Traversable (for)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.StablePtr (StablePtr, freeStablePtr)
@@ -28,7 +28,6 @@ import Language.Haskell.TH.Syntax (getQ, putQ)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import TH.Utilities (typeRepToType)
 import TS.AST qualified as TS
-import TS.Serialize (serializeDecl)
 import Type.Reflection (SomeTypeRep (..), Typeable, typeRep)
 
 #ifdef wasi_HOST_OS
@@ -234,7 +233,7 @@ mkExport sync exportName bodyExpr ty = do
         when hasOutDir do
             dir <- dropWhileEnd isSpace <$> readFile tsOutDirFile
             createDirectoryIfMissing True dir
-            T.writeFile (dir <> "/" <> exportName <> ".d.ts") $ serializeDecl tsDecl <> "\n"
+            Aeson.encodeFile (dir <> "/" <> exportName <> ".json") tsDecl
     -- Build Haskell FFI export
     wrapperName <- newName $ "js_export_" <> exportName
     let namedArgs = zipWith (\TypeInfo{..} n -> NamedArgInfo{var = mkName ("x" <> show @Int n), ..}) args [0 ..]
@@ -434,12 +433,21 @@ isSimpleFFIType = \case
 tsType :: Type -> Maybe TS.Type
 tsType = \case
     TupleT 0 -> Just TS.Void
+    -- opaque Haskell heap objects, wrapped by `cabal-npm` in a generated class named after the type
+    AppT (ConT sp) (ConT n) | sp == ''StablePtr -> Just $ TS.Ref $ T.pack $ nameBase n
+    AppT ListT t
+        -- Haskell strings are converted whole, rather than as lists of characters
+        | t == ConT ''Char -> Just TS.String
+        | otherwise -> TS.Array <$> tsType t
     ConT n
         | n == ''Bool -> Just TS.Boolean
-        | n == ''Char -> Just TS.String
+        -- Char is marshalled as a Unicode code point
+        | n == ''Char -> Just TS.Number
         | n == ''Text -> Just TS.String
         | n == ''ByteString -> Just TS.String
         | n == ''ShortByteString -> Just TS.String
+        | n == ''JSString -> Just TS.String
+        | n == ''JSVal -> Just TS.Unknown
         | n == ''Int -> Just TS.Number
         | n == ''Word -> Just TS.Number
         | n == ''Int8 -> Just TS.Number

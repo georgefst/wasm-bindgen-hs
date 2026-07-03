@@ -59,6 +59,14 @@ packConfig = do
                 <> value "^0.4.2"
                 <> showDefaultWith T.unpack
                 <> help "Version constraint for @bjorn3/browser_wasi_shim"
+    wasmCabal <-
+        optional . strOption @Text $
+            long "wasm-cabal"
+                <> metavar "CMD"
+                <> help
+                    "A cabal command already configured for the Wasm toolchain, \
+                    \e.g. ghc-wasm-meta's wasm32-wasi-cabal (default: the invoking \
+                    \cabal, pointed at the toolchain programs found on PATH)"
     pure
         PackConfig
             { packageName = fromMaybe cabalTarget packageName

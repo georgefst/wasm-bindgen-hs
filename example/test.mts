@@ -14,6 +14,11 @@ import {
   addInt,
   getCurrentTimeText,
   primesUpTo,
+  chunkWords,
+  newCounter,
+  incrementCounter,
+  describeCounter,
+  Counter,
 } from "example";
 
 before(async () => {
@@ -38,21 +43,32 @@ describe("sync exports", () => {
   });
 
   it("negateBool", () => {
-    // GHC Wasm FFI marshals Bool as 0/1, not false/true
-    assert.equal(!!negateBool(true), false);
-    assert.equal(!!negateBool(false), true);
+    assert.equal(negateBool(true), false);
+    assert.equal(negateBool(false), true);
   });
 
   it("theAnswer", () => {
     assert.equal(theAnswer(), 4815162342n);
   });
 
-  it("primesUpTo", () => {
-    assert.equal(primesUpTo(6), "[2,3,5,7,11,13]");
-  });
-
   it("getCurrentTimeText", () => {
     assert.match(getCurrentTimeText(), /^\d{4}-\d{2}-\d{2}/);
+  });
+});
+
+describe("lists", () => {
+  it("primesUpTo", () => {
+    assert.deepEqual(primesUpTo(6), [2, 3, 5, 7, 11, 13]);
+    assert.deepEqual(primesUpTo(0), []);
+  });
+
+  it("chunkWords (nested lists)", () => {
+    assert.deepEqual(chunkWords(2, "the quick brown fox jumps"), [
+      ["the", "quick"],
+      ["brown", "fox"],
+      ["jumps"],
+    ]);
+    assert.deepEqual(chunkWords(3, ""), []);
   });
 });
 
@@ -76,5 +92,31 @@ describe("async exports", () => {
   it("logMessage", async () => {
     const result = await logMessage("test message from JS");
     assert.equal(result, undefined);
+  });
+});
+
+describe("opaque types", () => {
+  it("counters are independent and stateful", async () => {
+    const a = await newCounter("a");
+    const b = await newCounter("b");
+    assert.ok(a instanceof Counter);
+    assert.equal(await incrementCounter(a), 1);
+    assert.equal(await incrementCounter(a), 2);
+    assert.equal(await incrementCounter(b), 1);
+    assert.equal(await describeCounter(a), "a: 2");
+    assert.equal(await describeCounter(b), "b: 1");
+  });
+
+  it("cannot be constructed directly", () => {
+    // @ts-expect-error the constructor is declared private
+    assert.throws(() => new Counter(42));
+  });
+
+  it("explicit free is idempotent, and use after free throws", async () => {
+    const c = await newCounter("c");
+    assert.equal(await incrementCounter(c), 1);
+    c.free();
+    c.free();
+    await assert.rejects(async () => incrementCounter(c), /freed Counter/);
   });
 });

@@ -37,3 +37,4 @@ executable cabal-npm
         process,
         temporary,
         text,
+        wasm-bindgen-hs,
