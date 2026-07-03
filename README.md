@@ -22,6 +22,36 @@ While also generating TypeScript declarations, e.g. for use by `cabal-npm`:
 export function getCurrentTimeText(): Promise<string>;
 ```
 
+## Lists
+
+Lists of otherwise-supported types (including nested lists, and `StablePtr`s) are converted to and from JS arrays. `String` (i.e. `[Char]`) is special-cased, and converted whole to a JS string.
+
+## Opaque Haskell values (`StablePtr`)
+
+Haskell heap objects can be passed to JS opaquely by using `StablePtr` in exported signatures. `StablePtr t` arguments and results are passed through the FFI unconverted (they appear as plain numbers at the raw FFI boundary):
+
+```hs
+data Counter = Counter Text (IORef Int)
+
+newCounter :: Text -> IO (StablePtr Counter)
+newCounter name = newStablePtr . Counter name =<< newIORef 0
+$(exportDeclJS Async 'newCounter)
+
+incrementCounter :: StablePtr Counter -> IO Int
+incrementCounter ptr = do
+    Counter _ ref <- deRefStablePtr ptr
+    modifyIORef' ref (+ 1)
+    readIORef ref
+$(exportDeclJS Async 'incrementCounter)
+```
+
+For every type `T` which appears as `StablePtr T` in any export, a synchronous `free_T` export (wrapping `freeStablePtr`) is generated automatically, exactly once per module. Note that:
+
+- The `StablePtr` payload must be a plain type constructor, so that the freeing export can be named after it.
+- Using the same opaque type in exports across _multiple modules_ will currently generate clashing `free_T` exports, as will two types with the same base name in one module (the latter is detected and rejected at compile time).
+
+In packages assembled by `cabal-npm`, each opaque type is wrapped in a generated JS class holding the pointer privately, registered with a `FinalizationRegistry` so that the Haskell-side stable pointer is released when the JS wrapper is garbage-collected. Exported functions accept and return instances of these classes, so consumers never see raw pointers.
+
 # `cabal-npm`
 
 Creates a TypeScript NPM package out of the generated bindings.
