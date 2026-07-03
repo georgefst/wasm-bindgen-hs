@@ -1,0 +1,13 @@
+{
+  "name": "wasm-bindgen-hs-example-dev",
+  "private": true,
+  "type": "module",
+  "description": "Dev harness for testing the NPM package generated into npm/ by `cabal npm`",
+  "dependencies": {
+    "example": "file:npm"
+  },
+  "devDependencies": {
+    "@types/node": "^26",
+    "typescript": "^6"
+  }
+}

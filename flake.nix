@@ -30,6 +30,14 @@
                       exec wasm32-unknown-wasi-cabal "$@"
                     ''
                   )
+                  pkgs.nodejs
+                  # Expose the packer as `cabal npm` (via cabal's external
+                  # command system) without requiring `cabal install`.
+                  (
+                    pkgs.writeShellScriptBin "cabal-npm" ''
+                      exec cabal run -v0 exe:cabal-npm -- "$@"
+                    ''
+                  )
                 ];
                 shell.shellHook = ''
                   export NIX_LDFLAGS=$(echo "$NIX_LDFLAGS" | tr ' ' '\n' | grep -v 'wasm' | tr '\n' ' ')
