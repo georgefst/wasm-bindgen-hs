@@ -68,8 +68,12 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
         (removeFile tsOutDirFile)
         (callWasmCabal cabal ["build", cabalTarget, buildDirFlag])
 
-    -- Locate the built wasm binary
-    wasmBin <- T.unpack <$> readWasmCabal cabal ["list-bin", cabalTarget, buildDirFlag]
+    -- Locate the built wasm binary. The path is the last line of the output:
+    -- cabal (or git subprocesses it spawns, e.g. when syncing
+    -- source-repository-packages) may print progress messages first.
+    wasmBin <-
+        T.unpack . snd . T.breakOnEnd "\n"
+            <$> readWasmCabal cabal ["list-bin", cabalTarget, buildDirFlag]
 
     -- Locate GHC libdir for post-link.mjs
     wasmGhc <- getWasmGhc
