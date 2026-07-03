@@ -93,9 +93,8 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
     putStrLn $ "Copying " <> wasmBin <> " -> " <> wasmOut
     copyFile wasmBin wasmOut
 
-    -- Write out the generic runtime (for now identical for every package;
-    -- we may generate it per-target eventually)
-    T.writeFile (outDir </> "runtime.mjs") runtimeMjs
+    -- Write out the runtime
+    T.writeFile (outDir </> "runtime.mjs") $ runtimeMjs $ cabalTarget <> ".wasm"
 
     -- Read export declarations from the TH-generated fragments
     decls <- readDecls tsOutDir
@@ -109,13 +108,32 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
     T.writeFile (outDir </> "index.d.mts") $ generateDeclarations bindings
 
     -- Generate index.mjs
-    T.writeFile (outDir </> "index.mjs") $ generateIndexMjs cabalTarget bindings
+    T.writeFile (outDir </> "index.mjs") $ generateIndexMjs bindings
 
     -- Generate package.json
-    LBS.writeFile (outDir </> "package.json") $ Aeson.encodePretty packageJson <> "\n"
+    LBS.writeFile (outDir </> "package.json") $ Aeson.encodePretty' packageJsonFormat packageJson <> "\n"
 
     putStrLn $ "NPM package assembled in " <> outDir <> "/"
   where
+    -- Order matters in "exports": conditions are tried in object order, so
+    -- "types" must precede "default". The other keys are just conventional.
+    packageJsonFormat =
+        Aeson.defConfig
+            { Aeson.confCompare =
+                Aeson.keyOrder
+                    [ "name"
+                    , "version"
+                    , "type"
+                    , "main"
+                    , "types"
+                    , "exports"
+                    , "files"
+                    , "dependencies"
+                    , "devDependencies"
+                    , "default"
+                    ]
+                    <> compare
+            }
     packageJson =
         Aeson.object
             [ "name" .= packageName
@@ -123,6 +141,14 @@ pack PackConfig{..} = withSystemTempDirectory "cabal-npm" \tmpDir -> do
             , "type" .= ("module" :: Text)
             , "main" .= ("index.mjs" :: Text)
             , "types" .= ("index.d.ts" :: Text)
+            , "exports"
+                .= Aeson.object
+                    [ "."
+                        .= Aeson.object
+                            [ "types" .= ("./index.d.mts" :: Text)
+                            , "default" .= ("./index.mjs" :: Text)
+                            ]
+                    ]
             , "files"
                 .= ( [ "index.mjs" :: Text
                      , "index.d.ts"
@@ -181,9 +207,9 @@ generateDeclarations Bindings{..} =
             <> map serializeOpaqueClassDecl opaqueTypes
             <> map serializeDecl functions
 
-generateIndexMjs :: Text -> Bindings -> Text
-generateIndexMjs wasmFile Bindings{..} =
-    T.replace "WASM_FILE" wasmFile template
+generateIndexMjs :: Bindings -> Text
+generateIndexMjs Bindings{..} =
+    template
         <> "\n"
         <> T.unlines (map opaqueClass opaqueTypes <> map export functions)
   where
@@ -194,7 +220,7 @@ generateIndexMjs wasmFile Bindings{..} =
         let _exports;
 
         export async function init() {
-          _exports = await _init("WASM_FILE.wasm");
+          _exports = await _init();
         }
 
         function _call(name, args) {

@@ -110,37 +110,20 @@
   <div class="result" id="logMessage-out"></div>
 </div>
 
+<!-- The generated package imports its WASI shim dependency by bare specifier;
+     when consuming it unbundled, an import map provides the resolution
+     (pointing into node_modules, so run `npm install` first). -->
+<script type="importmap">
+  {
+    "imports": {
+      "@bjorn3/browser_wasi_shim": "./node_modules/@bjorn3/browser_wasi_shim/dist/index.js"
+    }
+  }
+</script>
 <script type="module">
-  import { WASI, OpenFile, File, ConsoleStdout } from "./node_modules/@bjorn3/browser_wasi_shim/dist/index.js";
+  import * as lib from "./npm/index.mjs";
 
   const status = document.getElementById("status");
-  let exports;
-
-  async function init() {
-    const fds = [
-      new OpenFile(new File([])),
-      ConsoleStdout.lineBuffered(msg => console.log(msg)),
-      ConsoleStdout.lineBuffered(msg => console.warn(msg)),
-    ];
-    const wasi = new WASI([], [], fds);
-
-    const [{ default: ghc_wasm_jsffi }, wasmBytes] = await Promise.all([
-      import("./npm/ghc_wasm_jsffi.js"),
-      fetch("./npm/example.wasm").then(r => r.arrayBuffer()),
-    ]);
-
-    const __exports = {};
-    const jsffiImports = ghc_wasm_jsffi(__exports);
-
-    const { instance } = await WebAssembly.instantiate(wasmBytes, {
-      wasi_snapshot_preview1: wasi.wasiImport,
-      ghc_wasm_jsffi: jsffiImports,
-    });
-
-    Object.assign(__exports, instance.exports);
-    wasi.initialize(instance);
-    exports = instance.exports;
-  }
 
   function int(id) { return parseInt(document.getElementById(id).value); }
   function float(id) { return parseFloat(document.getElementById(id).value); }
@@ -153,7 +136,7 @@
   window.run = function(name, args) {
     const out = document.getElementById(name + "-out");
     try {
-      const result = exports[name](...args);
+      const result = lib[name](...args);
       out.textContent = String(result);
     } catch (e) {
       out.textContent = "Error: " + e.message;
@@ -163,7 +146,7 @@
   window.runAsync = async function(name, args) {
     const out = document.getElementById(name + "-out");
     try {
-      const result = await exports[name](...args);
+      const result = await lib[name](...args);
       out.textContent = result === undefined ? "(void)" : String(result);
     } catch (e) {
       out.textContent = "Error: " + e.message;
@@ -171,7 +154,7 @@
   };
 
   try {
-    await init();
+    await lib.init();
     status.textContent = "Ready";
     status.className = "ready";
   } catch (e) {
