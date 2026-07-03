@@ -1,0 +1,39 @@
+cabal-version: 3.0
+-- Named so that the executable component, when on PATH, can be invoked as
+-- `cabal npm` via cabal's external command system.
+name: cabal-npm
+version: 0.1.0.0
+license-file: LICENSE
+author: George Thomas
+maintainer: georgefsthomas@gmail.com
+
+executable cabal-npm
+    default-language: GHC2024
+    default-extensions:
+        BlockArguments
+        DerivingStrategies
+        DuplicateRecordFields
+        NamedFieldPuns
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        RecordWildCards
+    ghc-options:
+        -Wall
+        -threaded
+    hs-source-dirs: src
+    main-is: Main.hs
+    other-modules:
+        Pack
+        Runtime
+    build-depends:
+        aeson,
+        aeson-pretty,
+        base,
+        bytestring,
+        directory,
+        filepath,
+        optparse-applicative,
+        process,
+        temporary,
+        text,

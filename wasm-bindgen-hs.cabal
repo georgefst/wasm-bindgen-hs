@@ -32,6 +32,7 @@ common common
         aeson,
         base >=4.14,
         bytestring,
+        directory,
         ghc-experimental,
         template-haskell,
         text,
@@ -50,6 +51,8 @@ library
     import: common
     hs-source-dirs: src
     exposed-modules:
+        TS.AST
+        TS.Serialize
         Wasm.Export
 
 executable example

@@ -1,2 +1,4 @@
 dist*/
 result
+node_modules/
+example/npm/

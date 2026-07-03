@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wasm-bindgen-hs example</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 1rem; font-size: 1.4rem; }
+  h2 { margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 1.1rem; }
+  .fn { margin-bottom: 1rem; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; }
+  .fn label { font-weight: 600; font-family: monospace; font-size: 0.95rem; display: block; margin-bottom: 0.4rem; }
+  .fn input { width: 80px; padding: 0.3rem; margin-right: 0.3rem; font-family: monospace; }
+  .fn button { padding: 0.3rem 0.8rem; cursor: pointer; }
+  .fn .result { margin-top: 0.4rem; font-family: monospace; color: #555; min-height: 1.2em; }
+  #status { margin-bottom: 1rem; padding: 0.5rem; border-radius: 4px; }
+  #status.loading { background: #fef3c7; }
+  #status.ready { background: #d1fae5; }
+  #status.error { background: #fee2e2; }
+</style>
+</head>
+<body>
+
+<h1>wasm-bindgen-hs example</h1>
+<div id="status" class="loading">Loading Wasm module...</div>
+
+<h2>Sync</h2>
+
+<div class="fn">
+  <label>addInt(a, b) : number</label>
+  <input id="addInt-a" type="number" value="2" />
+  <input id="addInt-b" type="number" value="3" />
+  <button onclick="run('addInt', [int('addInt-a'), int('addInt-b')])">Run</button>
+  <div class="result" id="addInt-out"></div>
+</div>
+
+<div class="fn">
+  <label>addByte(a, b) : number</label>
+  <input id="addByte-a" type="number" value="10" />
+  <input id="addByte-b" type="number" value="20" />
+  <button onclick="run('addByte', [int('addByte-a'), int('addByte-b')])">Run</button>
+  <div class="result" id="addByte-out"></div>
+</div>
+
+<div class="fn">
+  <label>multiplyDouble(a, b) : number</label>
+  <input id="multiplyDouble-a" type="number" value="2.5" step="any" />
+  <input id="multiplyDouble-b" type="number" value="4.0" step="any" />
+  <button onclick="run('multiplyDouble', [float('multiplyDouble-a'), float('multiplyDouble-b')])">Run</button>
+  <div class="result" id="multiplyDouble-out"></div>
+</div>
+
+<div class="fn">
+  <label>negateBool(x) : boolean</label>
+  <select id="negateBool-a"><option value="1">true</option><option value="0">false</option></select>
+  <button onclick="run('negateBool', [int('negateBool-a')])">Run</button>
+  <div class="result" id="negateBool-out"></div>
+</div>
+
+<div class="fn">
+  <label>theAnswer() : bigint</label>
+  <button onclick="run('theAnswer', [])">Run</button>
+  <div class="result" id="theAnswer-out"></div>
+</div>
+
+<div class="fn">
+  <label>primesUpTo(n) : string</label>
+  <input id="primesUpTo-a" type="number" value="10" />
+  <button onclick="run('primesUpTo', [int('primesUpTo-a')])">Run</button>
+  <div class="result" id="primesUpTo-out"></div>
+</div>
+
+<div class="fn">
+  <label>getCurrentTimeText() : string</label>
+  <button onclick="run('getCurrentTimeText', [])">Run</button>
+  <div class="result" id="getCurrentTimeText-out"></div>
+</div>
+
+<h2>Async</h2>
+
+<div class="fn">
+  <label>greetManyPure(a, b, c) : Promise&lt;string&gt;</label>
+  <input id="greetManyPure-a" value="Alice" style="width:80px" />
+  <input id="greetManyPure-b" value="Bob" style="width:80px" />
+  <input id="greetManyPure-c" value="Charlie" style="width:80px" />
+  <button onclick="runAsync('greetManyPure', [str('greetManyPure-a'), str('greetManyPure-b'), str('greetManyPure-c')])">Run</button>
+  <div class="result" id="greetManyPure-out"></div>
+</div>
+
+<div class="fn">
+  <label>replicateText(n, text) : Promise&lt;string&gt;</label>
+  <input id="replicateText-a" type="number" value="3" />
+  <input id="replicateText-b" value="ha" style="width:80px" />
+  <button onclick="runAsync('replicateText', [int('replicateText-a'), str('replicateText-b')])">Run</button>
+  <div class="result" id="replicateText-out"></div>
+</div>
+
+<div class="fn">
+  <label>greet(name) : Promise&lt;string&gt;</label>
+  <input id="greet-a" value="World" style="width:160px" />
+  <button onclick="runAsync('greet', [str('greet-a')])">Run</button>
+  <div class="result" id="greet-out"></div>
+</div>
+
+<div class="fn">
+  <label>logMessage(msg) : Promise&lt;void&gt;</label>
+  <input id="logMessage-a" value="Hello from the browser" style="width:200px" />
+  <button onclick="runAsync('logMessage', [str('logMessage-a')])">Run</button>
+  <div class="result" id="logMessage-out"></div>
+</div>
+
+<script type="module">
+  import { WASI, OpenFile, File, ConsoleStdout } from "./node_modules/@bjorn3/browser_wasi_shim/dist/index.js";
+
+  const status = document.getElementById("status");
+  let exports;
+
+  async function init() {
+    const fds = [
+      new OpenFile(new File([])),
+      ConsoleStdout.lineBuffered(msg => console.log(msg)),
+      ConsoleStdout.lineBuffered(msg => console.warn(msg)),
+    ];
+    const wasi = new WASI([], [], fds);
+
+    const [{ default: ghc_wasm_jsffi }, wasmBytes] = await Promise.all([
+      import("./npm/ghc_wasm_jsffi.js"),
+      fetch("./npm/example.wasm").then(r => r.arrayBuffer()),
+    ]);
+
+    const __exports = {};
+    const jsffiImports = ghc_wasm_jsffi(__exports);
+
+    const { instance } = await WebAssembly.instantiate(wasmBytes, {
+      wasi_snapshot_preview1: wasi.wasiImport,
+      ghc_wasm_jsffi: jsffiImports,
+    });
+
+    Object.assign(__exports, instance.exports);
+    wasi.initialize(instance);
+    exports = instance.exports;
+  }
+
+  function int(id) { return parseInt(document.getElementById(id).value); }
+  function float(id) { return parseFloat(document.getElementById(id).value); }
+  function str(id) { return document.getElementById(id).value; }
+
+  window.int = int;
+  window.float = float;
+  window.str = str;
+
+  window.run = function(name, args) {
+    const out = document.getElementById(name + "-out");
+    try {
+      const result = exports[name](...args);
+      out.textContent = String(result);
+    } catch (e) {
+      out.textContent = "Error: " + e.message;
+    }
+  };
+
+  window.runAsync = async function(name, args) {
+    const out = document.getElementById(name + "-out");
+    try {
+      const result = await exports[name](...args);
+      out.textContent = result === undefined ? "(void)" : String(result);
+    } catch (e) {
+      out.textContent = "Error: " + e.message;
+    }
+  };
+
+  try {
+    await init();
+    status.textContent = "Ready";
+    status.className = "ready";
+  } catch (e) {
+    status.textContent = "Failed to load: " + e.message;
+    status.className = "error";
+    console.error(e);
+  }
+</script>
+
+</body>
+</html>

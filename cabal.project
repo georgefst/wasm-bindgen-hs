@@ -1,6 +1,7 @@
 packages:
     .
     canary
+    cabal-npm
 
 package wasm-bindgen-hs
     tests: True
